@@ -1,0 +1,91 @@
+# Spec: Extract Pop & Lock 9 Climbing Results → Single CSV
+
+**You are:** a developer writing an extraction script. **You will not be given this analyst's session context**, so treat everything below as self-contained. Read it fully before writing code.
+
+## 1. Goal
+Parse all 10 category result files from the climbing competition and emit **one combined CSV in the workspace** (suggested name: `pop_and_lock_9_results.csv`) containing every athlete appearance, one row per athlete-per-category.
+
+## 2. Source data — inputs and hard constraints
+- **Location:** `C:\Users\xeon\Documents\20261017 Pop and Lock 9 Results` (read-only).
+- **Inputs = exactly these 10 HTML files**, one per category:
+  `openmalefinal.html`, `openfemalefinal.html`, `openmalequali.html`, `openfemalequali.html`, `youthbmale.html`, `youthbfemale.html`, `youthcmale.html`, `youthcfemale.html`, `youthdmale.html`, `youthdfemale.html`
+- **Ignore every folder**, especially the ten `*_files/` asset folders (CSS/JS/images). They contain no data.
+- **Never write to, modify, rename, or re-save anything in that folder.** Originals must be byte-for-byte untouched when you're done.
+- Practical note: each file is ~120 KB and the results table lives on essentially **one unbroken line** inside a heavy Vue.js app shell (scripts, nav, round tabs, footer). Line-oriented tools will struggle; use a real HTML parser (e.g., Python + BeautifulSoup or equivalent) that can handle minified markup.
+
+## 3. What's in the HTML (verified structure — all 10 files share this exactly)
+The results live in one table: `<table class="table bg-white m-0">`. Each athlete = **exactly two consecutive rows**:
+
+**Row A — name/score row:** `<tr class="r-row no-border-bottom">` containing, in order:
+| Element | Class / selector | Content example | Use |
+|---|---|---|---|
+| Rank cell | `td.rank` | `1`, `24` | **Not a deliverable field — capture only if you want it for sanity checks** |
+| Name link | `a.r-name` | ` Lila ZIMMERMAN ` (padding spaces) | → `name`. A sibling `.r-name-sub` span holds a region code like `BC` — **ignore it**. |
+| Score | first `<span>` inside `td.r-score > div.text-center` | ` 249.9 ` | → `score` |
+
+**Row B — detail row (always immediately follows Row A):** `<tr class="no-border-top boulder-asc-detail">`, second cell has `colspan=2` and contains `.asc-details-container`. Inside it there is **one `<div class="asc-cell-container">` per problem**, each holding:
+| Element | Selector inside container | Meaning / example |
+|---|---|---|
+| Attempts-to-top | `.asc-cell .top span` (first span) if present; `.top` gains class `topped` when topped. E.g. `<div class="top topped"><span>2</span></div>` | → top-attempts for this problem |
+| Attempts-to-zone | `.asc-cell .zone span` if present; `.zone` gains class `zoned`. E.g. `<div class="zone zoned"><span>1</span></div>` | → zone-attempts for this problem |
+| Problem number | `.asc-route-name` text, e.g. ` 5 ` (padding spaces) | **This is the authoritative slot index — map by it, don't assume position** |
+| Separator | `.status-line`, usually a bullet `•`. ⚠️ In finals rounds some status lines contain point values like `4` or `9` instead of bullets. **Ignore this element entirely.** |
+
+**Verified edge cases (your parser must handle all):**
+1. **Not attempted:** `<div class="asc-cell pending">` — both `.top` and `.zone` are empty (contain only Vue comments). → leave **both columns blank**.
+2. **Zoned but not topped:** `.top` has no span, `.zone.zoned` has one (very common: e.g. `zone=1`, top blank). → zone value present, top blank.
+3. **Multiple attempts:** spans contain small integers (`1`–`6+`) — just read the text.
+4. Vue leaves `<!---->` comment nodes inside name/score/cell elements throughout. Use element text extraction (e.g., `.get_text()`), which naturally skips them, then trim.
+
+## 4. Extraction rules
+Process files in any order; for each file:
+1. Locate the single results table (`table.table.bg-white.m-0`). Parse **only inside it** — the page continues after `</table>` with a footer (`.rs-footer`) and other app chrome that must not be read as data.
+2. Iterate its `<tr>` children expecting the repeating pattern **[Row A, Row B]**. If you encounter any row that doesn't fit the pattern, stop and report which file/position — don't guess.
+3. For each athlete:
+   - `name` = text of `a.r-name`, **trimmed**, with internal runs of whitespace collapsed to single spaces. Names look like `Maxwell MARSHALL`.
+   - `score` = first span in the `.text-center` div, trimmed. Write it out **as-is as a string** (e.g., `"249.9"`). Do not convert to float and re-serialize (avoids rounding/format drift), do not recompute scores from attempts — scoring is opaque and out of scope.
+   - `category` = the file's name without extension (e.g., `openmalefinal`). Files are already space-free; if you ever see a spaced stem, strip spaces/hyphens for this column.
+   - For each `.asc-cell-container` in Row B: read route number from `.asc-route-name`; place top/zone attempt values into that problem's columns. If the span is absent → **blank**, never `0`. The source uses absence-of-number to mean "no top / no zone / not attempted"; inventing zeros would corrupt analysis downstream.
+   - Attempt values, when present, are single positive integers — validate as such; warn on anything else (e.g., a decimal where an integer is expected).
+
+## 5. Output CSV specification
+- **Location:** the workspace root (current working directory of this project), one file: `pop_and_lock_9_results.csv`.
+- **Encoding:** UTF-8, standard comma delimiter, header row, all rows same column count. Quote fields only if a name ever contains a comma (none expected).
+- **Exact header, in this order** (problems grouped per number; padded to 10 — the maximum seen):
+
+```
+name,score,category,p1_top,p1_zone,p2_top,p2_zone,...,p9_top,p9_zone,p10_top,p10_zone
+```
+
+i.e. `name`, `score`, `category`, then for N = 1..10: `p{N}_top` (attempts to top), `p{N}_zone` (attempts to zone). **Total: 3 + 20 = 23 columns.**
+- Fill each problem's pair from the athlete's cells; **leave blank** for any problem that doesn't exist in that category or was not attempted. A 4-problem finals row will therefore have `p5..p10` all blank — that's correct, not a bug.
+
+## 6. Validation & QA checks (run after extraction; report results)
+1. **Files processed:** exactly 10.
+2. **Row-pair integrity per file:** count of Row A == count of Row B for every file.
+3. **Name/score validity, every row:** non-empty name; score matches one decimal place (pattern like `^\d{1,3}\.\d$` — observed values: `0.x` to `249.9`) and is within 0–250.
+4. **Per-file problem count N** = the set of route numbers present in each file's rows. All rows *within a file* must share the identical slot set {1..N}. Known-good observed values: **openmalefinal = 4, youthbmale = 8, youthcfemale = 10 problems**. Expect every file's N ∈ {4, 8, 10}; report (don't fail) if another number appears — a different round could legitimately differ.
+5. **Route numbering:** per row, numbers should be exactly `1..N` with no gaps/duplicates. Pending cells still carry their route number and must keep the slot blank-but-present.
+6. **Total rows ≈ 250** across all files (user's ballpark; includes cross-category repeats). Reference anchor: youthbmale alone has **exactly 24 athletes**. Warn if total falls far outside ~180–320.
+7. **Ground-truth spot checks** — your parser must reproduce these exactly or stop and investigate:
+
+| File | Rank | name | score | Expected detail (problem: top/zone) |
+|---|---|---|---|---|
+| `openmalefinal.html` | 1 | Nathaniel SMITH | 69.7 | p1: – / 2 · p2: – / 2 · p3: 2 / 2 · p4: 1 / 1 (then blanks) |
+| `youthcfemale.html` | 1 | Lila ZIMMERMAN | 249.9 | p1–p6: 1/1 each, p7: 2/1, p8–p10: 1/1 each |
+| `youthbmale.html` | 24 (last row) | Nico SALSA | 34.7 | p1–p5: blank/blank · p6: – / 1 · p7: 4 / 1 · p8: blank/blank |
+
+   (`–` = zone only, top blank.)
+8. **Rank monotonicity sanity check (optional):** within each file, scores should be non-increasing as rank increases; a violation suggests a mis-parsed row. Do not "fix" — report it.
+9. Confirm originals unchanged: compare before/after checksums or at minimum mtime of the 10 files if you have tooling for it.
+
+## 7. Explicit do-NOT list
+- Don't modify, move, or delete anything in the source folder; don't parse or output anything from `*_files/` folders.
+- Don't add fields beyond the spec (rank exists in the markup — **exclude it** unless asked).
+- Don't deduplicate athletes across categories: repeat appearances are intentional separate rows.
+- Don't emit `0` for missing attempts; blank is the only representation of "absent".
+- Don't attempt to recompute or cross-validate scores from attempt counts.
+- Don't hard-code a fixed problem count globally — derive N per file, pad output columns to 10.
+
+## 8. Definition of done
+`pop_and_lock_9_results.csv` exists in the workspace with the exact header above; all Section 6 checks pass (or deviations are reported, not silently patched); originals untouched. Include a short summary report: rows per file, N per file, total row count, and any warnings — that's your entire deliverable alongside the CSV.
