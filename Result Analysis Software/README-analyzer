@@ -1,0 +1,87 @@
+# Climbing Competition Results Analyzer
+
+A portable cross-platform desktop app for interactive visualization of climbing competition CSV data.
+
+## Features
+
+- **Load CSV files** with climbing competition results (any format with `name`, `score`, `category`, and `pN_top`/`pN_zone` columns)
+- **Score Histogram** — view score distribution with customizable bin width, threshold line, and athlete highlights
+- **Problem Box Plots** — compare zone/top attempts across problems with per-athlete markers
+- **Interactive controls** — zoom, pan, filter by category, highlight athletes, customize colors
+- **Colorblind-friendly** — orange zone / blue top distinction
+- **Cross-platform** — works on Windows, macOS, and Linux
+
+## Quick Start
+
+### 1. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Run the app
+
+```bash
+python climbing_analyzer.py
+```
+
+### 3. Load your data
+
+Click **📂 Load CSV** and select a CSV file with the expected format:
+
+| Column | Description |
+|--------|-------------|
+| `name` | Athlete name |
+| `score` | Final score |
+| `category` | Competition category |
+| `p1_top`, `p1_zone`, `p2_top`, `p2_zone`, ... | Problem attempts (integer or empty) |
+
+## Usage
+
+### Score Histogram (Tab 1)
+
+- **Bin width** — adjust with the slider (0.1 to 10.0)
+- **Threshold** — set the place number (default: 8th) to show the cutoff score line
+- **Highlight athletes** — check athletes in the sidebar to show their score as a colored vertical line
+- **Right-click** an athlete to change their highlight color
+
+### Problem Box Plots (Tab 2)
+
+- **Orange boxes** = zone attempts
+- **Blue boxes** = top attempts
+- **Colored dots** = highlighted athlete markers
+- **Blank annotations** below each problem show how many athletes didn't attempt it
+- **Jitter** automatically separates markers when more than 2 athletes are highlighted
+
+### Sidebar Controls
+
+| Control | Description |
+|---------|-------------|
+| Category dropdown | Switch between competition categories |
+| Athlete list | Check/uncheck to highlight athletes |
+| Bin width slider | Adjust histogram bin granularity |
+| Threshold place | Set the cutoff rank for the threshold line |
+| Clear Highlights | Uncheck all athletes |
+| Reset View | Reset zoom/pan on both plots |
+
+## Building a Standalone Executable (optional)
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed climbing_analyzer.py
+```
+
+Output: `dist/climbing_analyzer.exe` (Windows) or `climbing_analyzer` (macOS/Linux)
+
+## Technical Details
+
+| Layer | Technology |
+|-------|------------|
+| GUI | PySide6 (Qt 6) |
+| Plotting | matplotlib with Qt backend |
+| Data | pandas |
+| Language | Python 3.9+ |
+
+## License
+
+MIT
